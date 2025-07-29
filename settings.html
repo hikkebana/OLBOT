@@ -1,0 +1,136 @@
+<?php
+$accessToken = $_REQUEST['AUTH_ID'];
+?>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Настройки запуска БП</title>
+  <script src="https://api.bitrix24.com/api/v1/"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .block { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h2>Настройка бизнес-процессов для CRM-сущностей</h2>
+
+  <div id="configs"></div>
+  <button onclick="addConfig()">Добавить вариант</button>
+  <button onclick="saveConfigs()">Сохранить</button>
+
+  <script>
+    const container = document.getElementById('configs');
+
+    async function getTemplates(entityType) {
+      return new Promise(resolve => {
+        BX24.callMethod('bizproc.workflow.template.list', {
+          filter: { DOCUMENT_TYPE: ['crm', 'CCrmDocument', entityType] }
+        }, result => {
+          const templates = [];
+          do {
+            const items = result.data();
+            if (items) templates.push(...items);
+          } while (result.more());
+
+          resolve(templates);
+        });
+      });
+    }
+
+    function createTemplateSelect(templates, selectedId) {
+      const select = document.createElement('select');
+      for (const tpl of templates) {
+        const opt = document.createElement('option');
+        opt.value = tpl.ID;
+        opt.text = tpl.NAME;
+        if (tpl.ID == selectedId) opt.selected = true;
+        select.appendChild(opt);
+      }
+      return select;
+    }
+
+    async function addConfig(entity = '', templateId = '') {
+      const div = document.createElement('div');
+      div.className = 'block';
+
+      const entitySelect = document.createElement('select');
+      const types = ['LEAD', 'DEAL', 'CONTACT', 'COMPANY', 'SMART_INVOICE'];
+      types.forEach(type => {
+        const opt = document.createElement('option');
+        opt.value = type;
+        opt.innerText = type;
+        if (type === entity) opt.selected = true;
+        entitySelect.appendChild(opt);
+      });
+
+      const templateWrapper = document.createElement('div');
+      let templateSelect = document.createElement('select');
+      templateWrapper.appendChild(templateSelect);
+
+      const refreshTemplates = async () => {
+        const selectedType = entitySelect.value;
+        const templates = await getTemplates(selectedType);
+        const newSelect = createTemplateSelect(templates, templateId);
+        templateWrapper.innerHTML = '';
+        templateWrapper.appendChild(newSelect);
+      };
+
+      entitySelect.addEventListener('change', refreshTemplates);
+      await refreshTemplates();
+
+      const removeBtn = document.createElement('button');
+      removeBtn.innerText = 'Удалить';
+      removeBtn.onclick = () => container.removeChild(div);
+
+      div.appendChild(entitySelect);
+      div.appendChild(templateWrapper);
+      div.appendChild(removeBtn);
+
+      container.appendChild(div);
+    }
+
+    function saveConfigs() {
+      const data = [];
+      container.querySelectorAll('.block').forEach(div => {
+        const entity = div.querySelector('select').value;
+        const template = div.querySelectorAll('select')[1].value;
+        if (entity && template) {
+          data.push({ entity, template: parseInt(template) });
+        }
+      });
+
+      BX24.callMethod('app.option.set', {
+        options: { bp_configs: JSON.stringify(data) }
+      }, res => {
+        if (res.error()) {
+          alert('Ошибка: ' + res.error());
+        } else {
+          alert('Сохранено!');
+        }
+      });
+    }
+
+    function loadConfigs() {
+      BX24.callMethod('app.option.get', {}, async res => {
+        if (!res.error()) {
+          const raw = res.data().bp_configs;
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              for (const cfg of parsed) {
+                await addConfig(cfg.entity, cfg.template);
+              }
+            } catch {
+              await addConfig();
+            }
+          } else {
+            await addConfig();
+          }
+        }
+      });
+    }
+
+    BX24.init(() => loadConfigs());
+  </script>
+</body>
+</html>
